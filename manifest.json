@@ -1,0 +1,10 @@
+{
+  "name": "Controle de Bobinas",
+  "short_name": "Bobinas",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#17324d",
+  "description": "Leitura e consolidação local de etiquetas de bobinas de aço",
+  "icons": []
+}
