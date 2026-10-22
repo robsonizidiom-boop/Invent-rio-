@@ -31,14 +31,22 @@ footer{font-size:.82rem;color:#5b6770}
 <main>
 <section class="panel">
 <h2>1. Fotografar ou importar etiqueta</h2>
-<label for="photo">Foto da etiqueta</label>
-<input id="photo" type="file" accept="image/*"
+<div class="row">
+<div>
+<label for="photoCamera">Tirar foto com a câmera</label>
+<input id="photoCamera" type="file" accept="image/*" capture="environment">
+</div>
+<div>
+<label for="photoGallery">Selecionar da galeria</label>
+<input id="photoGallery" type="file" accept="image/*">
+</div>
+</div>
 <img id="preview" alt="Prévia da etiqueta">
 <div class="actions">
 <button id="readBtn">Ler etiqueta com OCR</button>
 <button id="clearForm" class="secondary">Limpar formulário</button>
 </div>
-<div id="ocrStatus" class="status" role="status">Selecione uma imagem. O OCR funciona no navegador e pode exigir internet na primeira utilização.</div>
+<div id="ocrStatus" class="status" role="status">Selecione ou fotografe uma imagem. O OCR funciona no navegador e pode exigir internet na primeira utilização.</div>
 </section>
 
 <section class="panel">
@@ -87,6 +95,7 @@ footer{font-size:.82rem;color:#5b6770}
 <script>
 const DB_NAME='controle-bobinas-db', STORE='records';
 let db;
+let activeFile = null;
 const $=id=>document.getElementById(id);
 function openDB(){return new Promise((resolve,reject)=>{
  const req=indexedDB.open(DB_NAME,1);
@@ -102,8 +111,7 @@ function dateText(v){return new Date(v).toLocaleString('pt-BR');}
 async function render(){
  const all=await getAll();const fLot=norm($('filterLot').value),fMat=norm($('filterMaterial').value);
  const shown=all.filter(r=>norm(r.lot).includes(fLot)&&norm(r.material).includes(fMat)).sort((a,b)=>b.created-a);
- $('countMetric').textContent=fmt(all.length);
- $('weightMetric').textContent=fmt(all.reduce((s,r)=>s+Number(r.weight||0),0));
+ $('countMetric').textContent=fmt(all.length);$('weightMetric').textContent=fmt(all.reduce((s,r)=>s+Number(r.weight||0),0));
  const groups={};all.forEach(r=>{const k=r.lot||'(sem lote)';if(!groups[k])groups[k]={count:0,weight:0};groups[k].count++;groups[k].weight+=Number(r.weight||0);});
  $('lotsMetric').textContent=Object.keys(groups).length;
  $('lotSummary').innerHTML=Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0])).map(([lot,g])=>`<tr><td>${esc(lot)}</td><td>${g.count}</td><td>${fmt(g.weight)}</td></tr>`).join('')||'<tr><td colspan="3">Nenhum registro ainda.</td></tr>';
@@ -111,13 +119,32 @@ async function render(){
  document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(confirm('Excluir este registro?')){await tx('readwrite',s=>s.delete(Number(b.dataset.delete)));await render();}});
 }
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-$('photo').addEventListener('change',()=>{const f=$('photo').files[0];if(!f)return;const img=$('preview');img.src=URL.createObjectURL(f);img.style.display='block';$('ocrStatus').textContent='Imagem carregada. Toque em “Ler etiqueta com OCR”.';});
+
+function handleFileSelection(file) {
+ if(!file) return;
+ activeFile = file;
+ const img=$('preview');
+ img.src=URL.createObjectURL(file);
+ img.style.display='block';
+ $('ocrStatus').textContent='Imagem carregada. Toque em “Ler etiqueta com OCR”.';
+}
+
+$('photoCamera').addEventListener('change', e => {
+ handleFileSelection(e.target.files[0]);
+ $('photoGallery').value = ''; // Limpa o outro input
+});
+
+$('photoGallery').addEventListener('change', e => {
+ handleFileSelection(e.target.files[0]);
+ $('photoCamera').value = ''; // Limpa o outro input
+});
+
 $('readBtn').onclick=async()=>{
- const file=$('photo').files[0];if(!file){$('ocrStatus').textContent='Selecione ou fotografe uma etiqueta primeiro.';return;}
+ if(!activeFile){$('ocrStatus').textContent='Selecione ou fotografe uma etiqueta primeiro.';return;}
  if(!window.Tesseract){$('ocrStatus').textContent='A biblioteca de OCR não carregou. Verifique a conexão com a internet e recarregue a página.';return;}
  $('readBtn').disabled=true;$('ocrStatus').textContent='Lendo a imagem… Isso pode levar alguns segundos.';
  try{
-  const result=await Tesseract.recognize(file,'por+eng',{logger:m=>{if(m.status)$('ocrStatus').textContent=m.status+(m.progress!=null?' '+Math.round(m.progress*100)+'%':'');}});
+  const result=await Tesseract.recognize(activeFile,'por+eng',{logger:m=>{if(m.status)$('ocrStatus').textContent=m.status+(m.progress!=null?' '+Math.round(m.progress*100)+'%':'');}});
   const text=result.data.text;$('ocrStatus').textContent='Texto reconhecido:\n'+text+'\n\nRevise e preencha os campos abaixo. A extração automática de campos específicos ainda depende do layout da etiqueta.';
   autoFill(text);
  }catch(e){$('ocrStatus').textContent='Não foi possível processar a imagem. Tente uma foto mais nítida e bem iluminada.';}
@@ -142,15 +169,14 @@ $('entryForm').onsubmit=async e=>{
  const all=await getAll();const duplicate=all.find(r=>norm(r.lot)===norm(record.lot)&&norm(r.coil)===norm(record.coil));
  if(duplicate&&!confirm('Já existe um registro com este lote e número de bobina. Salvar mesmo assim?'))return;
  await tx('readwrite',s=>s.add(record));$('formStatus').textContent=duplicate?'Registro salvo, mas atenção: há uma possível duplicidade.':'Registro salvo neste dispositivo.';
- $('entryForm').reset();$('photo').value='';$('preview').style.display='none';$('ocrStatus').textContent='Pronto para a próxima etiqueta.';await render();
+ $('entryForm').reset();$('photoCamera').value='';$('photoGallery').value='';activeFile=null;$('preview').style.display='none';$('ocrStatus').textContent='Pronto para a próxima etiqueta.';await render();
 };
-$('clearForm').onclick=()=>{$('entryForm').reset();$('photo').value='';$('preview').style.display='none';$('ocrStatus').textContent='Formulário limpo.';};
+$('clearForm').onclick=()=>{$('entryForm').reset();$('photoCamera').value='';$('photoGallery').value='';activeFile=null;$('preview').style.display='none';$('ocrStatus').textContent='Formulário limpo.';};
 $('filterLot').oninput=render;$('filterMaterial').oninput=render;
 $('exportBtn').onclick=async()=>{const all=await getAll();const rows=[['Data','Lote','Número da bobina','Código do material','Peso líquido (kg)'],...all.map(r=>[dateText(r.created),r.lot,r.coil,r.material,r.weight])];const csv='\ufeff'+rows.map(row=>row.map(csvCell).join(';')).join('\r\n');download(new Blob([csv],{type:'text/csv;charset=utf-8'}),'controle_bobinas.csv');};
-$('backupBtn').onclick=async()=>{const all=await getAll();download(new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),records:all},null,2)],{type:'application/json'}),'backup_bobinas.json');};
+$('backupBtn').onclick=async()=>{const all=await getAll();download(new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),records:all},null,2)],{type:‘application/json’}),'backup_bobinas.json');};
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-$('restoreFile').onchange=async()=>{const f=$('restoreFile').files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!Array.isArray(data.records))throw Error();if(!confirm(`Importar ${data.records.length} registros? Os registros existentes serão mantidos.`))return;for(const r of data.records){const clean={lot:String(r.lot||''),coil:String(r.coil||''),material:String(r.material||''),weight:Number(r.weight),created:Number(r.created)||Date.now()};if(clean.lot&&clean.coil&&clean.material&&clean.weight>0)await tx('readwrite',s=>s.add(clean));}await render();alert('Backup importado.');}catch(e){alert('Arquivo de backup inválido.');}finally{$('restoreFile').value='';}};
-$('deleteAllBtn').onclick=async()=>{if(confirm('Apagar TODOS os registros deste dispositivo? Faça um backup antes, se necessário.')){await tx('readwrite',s=>s.clear());await render();}};
+$('restoreFile').onchange=async()=>{const f=$('restoreFile').files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!Array.isArray(data.records))throw Error();if(!confirm(`Importar ${data.records.length} registros? Os registros existentes serão mantidos.`))return;for(const r of data.records){const clean={lot:String(r.lot||''),coil:String(r.coil||''),material:String(r.material||''),weight:Number(r.weight),created:Number(r.created)||Date.now()};if(clean.lot&&clean.coil&&clean.material&&clean.weight>0)await tx('readwrite',s=>s.add(clean));}await render();alert('Backup importado.');}catch(e){alert('Arquivo de backup inválido.');}finally{$('restoreFile').value='';}};$('deleteAllBtn').onclick=async()=>{if(confirm('Apagar TODOS os registros deste dispositivo? Faça um backup antes, se necessário.')){await tx('readwrite',s=>s.clear());await render();}};
 (async()=>{try{db=await openDB();await render();}catch(e){$('formStatus').textContent='Não foi possível abrir o armazenamento local. Verifique se o navegador permite dados locais.';}})();
 if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script>
